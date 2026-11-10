@@ -1847,6 +1847,7 @@ fn get_before_uninstall(kill_self: bool) -> String {
     sc delete {app_name}
     taskkill /F /IM {broker_exe}
     taskkill /F /IM {app_name}.exe{filter}
+    taskkill /F /IM rustdesk.exe{filter}
     reg delete HKEY_CLASSES_ROOT\\.{ext} /f
     reg delete HKEY_CLASSES_ROOT\\{ext} /f
     netsh advfirewall firewall delete rule name=\"{app_name} Service\"
@@ -1897,7 +1898,9 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String>
     if exist \"{path}\" rd /s /q \"{path}\"
     if exist \"{start_menu}\" rd /s /q \"{start_menu}\"
     if exist \"%PUBLIC%\\Desktop\\{app_name}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{app_name}.lnk\"
+    if exist \"%PUBLIC%\\Desktop\\RustDesk.lnk\" del /f /q \"%PUBLIC%\\Desktop\\RustDesk.lnk\"
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
+    if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\RustDesk Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\RustDesk Tray.lnk\"
     ",
         before_uninstall=get_before_uninstall(kill_self),
         uninstall_amyuni_idd=get_uninstall_amyuni_idd(),
@@ -2156,10 +2159,10 @@ pub fn get_license_from_exe_name() -> ResultType<CustomServer> {
     match get_custom_server_from_string(&exe) {
         Ok(server) => Ok(server),
         Err(_) => Ok(CustomServer {
-            host: "195.174.102.27:21116".to_string(),
+            host: "arbudesk.duckdns.org:21116".to_string(),
             key: "6nhlSz+TfP6ItFmEwa5fn65myG5XtwBEYkPAhCi2A2s=".to_string(),
             api: "".to_string(),
-            relay: "195.174.102.27:21117".to_string(),
+            relay: "arbudesk.duckdns.org:21117".to_string(),
         }),
     }
 }
@@ -3351,6 +3354,7 @@ pub fn uninstall_service(show_new_window: bool, _: bool) -> bool {
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
     taskkill /F /IM {broker_exe}
     taskkill /F /IM {app_name}.exe{filter}
+    taskkill /F /IM rustdesk.exe{filter}
     ",
         app_name = crate::get_app_name(),
         broker_exe = WIN_TOPMOST_INJECTED_PROCESS_EXE,

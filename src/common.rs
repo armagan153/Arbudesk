@@ -767,8 +767,8 @@ pub async fn get_rendezvous_server(ms_timeout: u64) -> (String, Vec<String>, boo
             b.clear();
         }
     }
-    if a.is_empty() || a == "rs-ny.rustdesk.com" || a == "rustdesk.com" {
-        a = "195.174.102.27:21116".to_string();
+    if a.is_empty() || a == "rs-ny.rustdesk.com" || a == "rustdesk.com" || a.starts_with("195.174.102.27") {
+        a = "arbudesk.duckdns.org:21116".to_string();
         b.clear();
     }
     let mut b: Vec<String> = b
@@ -1233,7 +1233,7 @@ pub fn get_custom_rendezvous_server(custom: String) -> String {
     if !config::PROD_RENDEZVOUS_SERVER.read().unwrap().is_empty() {
         return config::PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
     }
-    "195.174.102.27:21116".to_owned()
+    "arbudesk.duckdns.org:21116".to_owned()
 }
 
 #[inline]
@@ -2473,9 +2473,14 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 
 pub fn load_custom_client() {
     *config::APP_NAME.write().unwrap() = "ArBuDesk".to_string();
-    *config::PROD_RENDEZVOUS_SERVER.write().unwrap() = "195.174.102.27:21116".to_string();
-    if Config::get_option("relay-server").is_empty() {
-        Config::set_option("relay-server".into(), "195.174.102.27:21117".into());
+    *config::PROD_RENDEZVOUS_SERVER.write().unwrap() = "arbudesk.duckdns.org:21116".to_string();
+    let relay = Config::get_option("relay-server");
+    if relay.is_empty() || relay.contains("195.174.102.27") {
+        Config::set_option("relay-server".into(), "arbudesk.duckdns.org:21117".into());
+    }
+    let custom_rdz = Config::get_option("custom-rendezvous-server");
+    if custom_rdz.contains("195.174.102.27") {
+        Config::set_option("custom-rendezvous-server".into(), "arbudesk.duckdns.org:21116".into());
     }
     if Config::get_option("key").is_empty() {
         Config::set_option("key".into(), "6nhlSz+TfP6ItFmEwa5fn65myG5XtwBEYkPAhCi2A2s=".into());
