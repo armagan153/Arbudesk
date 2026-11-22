@@ -172,16 +172,16 @@ jobs:
               vcpkg-triplet: x64-windows-static,
               build-args: "--vram",
             }
-          - {
-              target: aarch64-pc-windows-msvc,
-              os: windows-11-arm,
-              arch: aarch64,
-              flutter-arch: arm64,
-              vcpkg-triplet: arm64-windows-static,
-              # vram is x86/x64-only (NVENC needs CUDA, Intel MediaSDK needs __rdtsc);
-              # no NV/Intel/AMD hardware exists on Windows-on-ARM, so vram stays disabled here.
-              build-args: "",
-            }
+          # - {
+          #     target: aarch64-pc-windows-msvc,
+          #     os: windows-11-arm,
+          #     arch: aarch64,
+          #     flutter-arch: arm64,
+          #     vcpkg-triplet: arm64-windows-static,
+          #     # vram is x86/x64-only (NVENC needs CUDA, Intel MediaSDK needs __rdtsc);
+          #     # no NV/Intel/AMD hardware exists on Windows-on-ARM, so vram stays disabled here.
+          #     build-args: "",
+          #   }
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -591,6 +591,7 @@ jobs:
 
   # The fallback for the flutter version, we use Sciter for 32bit Windows.
   build-for-windows-sciter:
+    if: false
     name: ${{ matrix.job.target }} (${{ matrix.job.os }})
     needs: [validate-update-metadata-keys]
     runs-on: ${{ matrix.job.os }}
@@ -803,7 +804,7 @@ jobs:
             ./SignOutput/rustdesk-*.exe
 
   build-rustdesk-ios:
-    if: ${{ inputs.upload-artifact }}
+    if: false
     name: build rustdesk ios ipa
     continue-on-error: true
     runs-on: ${{ matrix.job.os }}
@@ -926,6 +927,7 @@ jobs:
 
 
   build-for-macOS:
+    if: false
     name: ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
     needs: [generate-bridge]
@@ -1449,6 +1451,7 @@ jobs:
           files: rustdesk-${{ env.VERSION }}-unsigned.tar.gz
 
   build-rustdesk-android:
+    if: false
     needs: [generate-bridge]
     name: build rustdesk android apk ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
@@ -1768,7 +1771,7 @@ jobs:
   build-rustdesk-android-universal:
     needs: [build-rustdesk-android]
     name: build rustdesk android universal apk
-    if: ${{ inputs.upload-artifact }}
+    if: false
     runs-on: ubuntu-24.04
     env:
       reltype: release
