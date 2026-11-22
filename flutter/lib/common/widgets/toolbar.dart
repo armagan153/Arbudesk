@@ -589,12 +589,14 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
         connToken: connToken);
   }
 
-  if (isDefaultConn && isDesktop) {
+  if (isDefaultConn && (isDesktop || isMobile)) {
     v.add(
       TTextMenu(
           child: Text(translate('Transfer file')),
           onPressed: () => connectWithToken(isFileTransfer: true)),
     );
+  }
+  if (isDefaultConn && isDesktop) {
     v.add(
       TTextMenu(
           child: Text(translate('View camera')),

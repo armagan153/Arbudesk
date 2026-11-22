@@ -611,82 +611,109 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
         mainAxisSize: MainAxisSize.max,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
-          Row(
-              children: <Widget>[
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: <Widget>[
+                  IconButton(
+                    color: Colors.white,
+                    icon: Icon(Icons.clear),
+                    onPressed: () {
+                      clientClose(sessionId, gFFI);
+                    },
+                  ),
+                  IconButton(
+                    color: Colors.white,
+                    icon: Icon(Icons.tv),
+                    onPressed: () {
+                      setState(() => _showEdit = false);
+                      showOptions(context, widget.id, gFFI.dialogManager);
+                    },
+                  ),
+                  if (gFFI.connType == ConnType.defaultConn &&
+                      !gFFI.ffiModel.isPeerAndroid)
                     IconButton(
                       color: Colors.white,
-                      icon: Icon(Icons.clear),
+                      icon: const Icon(Icons.folder_shared_outlined),
+                      tooltip: translate('Transfer file'),
                       onPressed: () {
-                        clientClose(sessionId, gFFI);
+                        connect(
+                          context,
+                          widget.id,
+                          loginMethod: bind.sessionGetCommonSync(
+                                  sessionId: gFFI.sessionId,
+                                  key: 'login_method',
+                                  param: '') ??
+                              '',
+                          isFileTransfer: true,
+                          connToken: bind.sessionGetConnToken(
+                              sessionId: gFFI.sessionId),
+                        );
                       },
                     ),
-                    IconButton(
-                      color: Colors.white,
-                      icon: Icon(Icons.tv),
-                      onPressed: () {
-                        setState(() => _showEdit = false);
-                        showOptions(context, widget.id, gFFI.dialogManager);
-                      },
-                    )
-                  ] +
-                  (isWebDesktop || ffiModel.viewOnly || !ffiModel.keyboard
-                      ? []
-                      : gFFI.ffiModel.isPeerAndroid
-                          ? [
-                              IconButton(
-                                  color: Colors.white,
-                                  icon: Icon(Icons.keyboard),
-                                  onPressed: openKeyboard),
-                              IconButton(
-                                color: Colors.white,
-                                icon: const Icon(Icons.build),
-                                onPressed: () => gFFI.dialogManager
-                                    .toggleMobileActionsOverlay(ffi: gFFI),
-                              )
-                            ]
-                          : [
-                              IconButton(
-                                  color: Colors.white,
-                                  icon: Icon(Icons.keyboard),
-                                  onPressed: openKeyboard),
-                              IconButton(
-                                color: Colors.white,
-                                icon: Icon(gFFI.ffiModel.touchMode
-                                    ? Icons.touch_app
-                                    : Icons.mouse),
-                                onPressed: () => setState(
-                                    () => _showGestureHelp = !_showGestureHelp),
-                              ),
-                            ]) +
-                  (isWeb
-                      ? []
-                      : <Widget>[
-                          futureBuilder(
-                              future: gFFI.invokeMethod(
-                                  "get_value", "KEY_IS_SUPPORT_VOICE_CALL"),
-                              hasData: (isSupportVoiceCall) => IconButton(
+                ] +
+                    (isWebDesktop || ffiModel.viewOnly || !ffiModel.keyboard
+                        ? []
+                        : gFFI.ffiModel.isPeerAndroid
+                            ? [
+                                IconButton(
                                     color: Colors.white,
-                                    icon: isAndroid && isSupportVoiceCall
-                                        ? SvgPicture.asset('assets/chat.svg',
-                                            colorFilter: ColorFilter.mode(
-                                                Colors.white, BlendMode.srcIn))
-                                        : Icon(Icons.message),
-                                    onPressed: () =>
-                                        isAndroid && isSupportVoiceCall
-                                            ? showChatOptions(widget.id)
-                                            : onPressedTextChat(widget.id),
-                                  ))
-                        ]) +
-                  [
-                    IconButton(
-                      color: Colors.white,
-                      icon: Icon(Icons.more_vert),
-                      onPressed: () {
-                        setState(() => _showEdit = false);
-                        showActions(widget.id);
-                      },
-                    ),
-                  ]),
+                                    icon: Icon(Icons.keyboard),
+                                    onPressed: openKeyboard),
+                                IconButton(
+                                  color: Colors.white,
+                                  icon: const Icon(Icons.build),
+                                  onPressed: () => gFFI.dialogManager
+                                      .toggleMobileActionsOverlay(ffi: gFFI),
+                                )
+                              ]
+                            : [
+                                IconButton(
+                                    color: Colors.white,
+                                    icon: Icon(Icons.keyboard),
+                                    onPressed: openKeyboard),
+                                IconButton(
+                                  color: Colors.white,
+                                  icon: Icon(gFFI.ffiModel.touchMode
+                                      ? Icons.touch_app
+                                      : Icons.mouse),
+                                  onPressed: () => setState(
+                                      () => _showGestureHelp = !_showGestureHelp),
+                                ),
+                              ]) +
+                    (isWeb
+                        ? []
+                        : <Widget>[
+                            futureBuilder(
+                                future: gFFI.invokeMethod(
+                                    "get_value", "KEY_IS_SUPPORT_VOICE_CALL"),
+                                hasData: (isSupportVoiceCall) => IconButton(
+                                      color: Colors.white,
+                                      icon: isAndroid && isSupportVoiceCall
+                                          ? SvgPicture.asset('assets/chat.svg',
+                                              colorFilter: ColorFilter.mode(
+                                                  Colors.white, BlendMode.srcIn))
+                                          : Icon(Icons.message),
+                                      onPressed: () =>
+                                          isAndroid && isSupportVoiceCall
+                                              ? showChatOptions(widget.id)
+                                              : onPressedTextChat(widget.id),
+                                    ))
+                          ]) +
+                    [
+                      IconButton(
+                        color: Colors.white,
+                        icon: Icon(Icons.more_vert),
+                        onPressed: () {
+                          setState(() => _showEdit = false);
+                          showActions(widget.id);
+                        },
+                      ),
+                    ],
+              ),
+            ),
+          ),
           Obx(() => IconButton(
                 color: Colors.white,
                 icon: Icon(Icons.expand_more),

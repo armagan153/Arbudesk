@@ -890,121 +890,138 @@ class _CmControlPanel extends StatelessWidget {
       children: [
         Offstage(
           offstage: !client.inVoiceCall,
-          child: Row(
-            children: [
-              Expanded(
-                child: buildButton(context,
-                    color: MyTheme.accent,
-                    onClick: null, onTapDown: (details) async {
-                  final devicesInfo =
-                      await AudioInput.getDevicesInfo(true, true);
-                  List<String> devices = devicesInfo['devices'] as List<String>;
-                  if (devices.isEmpty) {
-                    msgBox(
-                      gFFI.sessionId,
-                      'custom-nocancel-info',
-                      'Prompt',
-                      'no_audio_input_device_tip',
-                      '',
-                      gFFI.dialogManager,
-                    );
-                    return;
-                  }
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 10.0),
+            padding: const EdgeInsets.all(4.0),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(10.0),
+              border: Border.all(
+                color: Colors.red.withOpacity(0.25),
+                width: 1.0,
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: buildButton(context,
+                      color: MyTheme.accent,
+                      onClick: null, onTapDown: (details) async {
+                    final devicesInfo =
+                        await AudioInput.getDevicesInfo(true, true);
+                    List<String> devices = devicesInfo['devices'] as List<String>;
+                    if (devices.isEmpty) {
+                      msgBox(
+                        gFFI.sessionId,
+                        'custom-nocancel-info',
+                        'Prompt',
+                        'no_audio_input_device_tip',
+                        '',
+                        gFFI.dialogManager,
+                      );
+                      return;
+                    }
 
-                  String currentDevice = devicesInfo['current'] as String;
-                  final x = details.globalPosition.dx;
-                  final y = details.globalPosition.dy;
-                  final position = RelativeRect.fromLTRB(x, y, x, y);
-                  showMenu(
-                    context: context,
-                    position: position,
-                    items: devices
-                        .map((d) => PopupMenuItem<String>(
-                              value: d,
-                              height: 18,
-                              padding: EdgeInsets.zero,
-                              onTap: () => AudioInput.setDevice(d, true, true),
-                              child: IgnorePointer(
-                                  child: RadioMenuButton(
+                    String currentDevice = devicesInfo['current'] as String;
+                    final x = details.globalPosition.dx;
+                    final y = details.globalPosition.dy;
+                    final position = RelativeRect.fromLTRB(x, y, x, y);
+                    showMenu(
+                      context: context,
+                      position: position,
+                      items: devices
+                          .map((d) => PopupMenuItem<String>(
                                 value: d,
-                                groupValue: currentDevice,
-                                onChanged: (v) {
-                                  if (v != null)
-                                    AudioInput.setDevice(v, true, true);
-                                },
-                                child: Container(
-                                  child: Text(
-                                    d,
-                                    overflow: TextOverflow.ellipsis,
-                                    maxLines: 1,
+                                height: 18,
+                                padding: EdgeInsets.zero,
+                                onTap: () => AudioInput.setDevice(d, true, true),
+                                child: IgnorePointer(
+                                    child: RadioMenuButton(
+                                  value: d,
+                                  groupValue: currentDevice,
+                                  onChanged: (v) {
+                                    if (v != null)
+                                      AudioInput.setDevice(v, true, true);
+                                  },
+                                  child: Container(
+                                    child: Text(
+                                      d,
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                    constraints: BoxConstraints(
+                                        maxWidth:
+                                            kConnectionManagerWindowSizeClosedChat
+                                                    .width -
+                                                80),
                                   ),
-                                  constraints: BoxConstraints(
-                                      maxWidth:
-                                          kConnectionManagerWindowSizeClosedChat
-                                                  .width -
-                                              80),
-                                ),
-                              )),
-                            ))
-                        .toList(),
-                  );
-                },
+                                )),
+                              ))
+                          .toList(),
+                    );
+                  },
+                      icon: Icon(
+                        Icons.call_rounded,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                      text: "Audio input",
+                      textColor: Colors.white),
+                ),
+                const SizedBox(width: 6.0),
+                Expanded(
+                  child: buildButton(
+                    context,
+                    color: const Color(0xFFD32F2F),
+                    onClick: () => closeVoiceCall(),
                     icon: Icon(
-                      Icons.call_rounded,
+                      Icons.call_end_rounded,
                       color: Colors.white,
                       size: 14,
                     ),
-                    text: "Audio input",
-                    textColor: Colors.white),
-              ),
-              Expanded(
-                child: buildButton(
-                  context,
-                  color: Colors.red,
-                  onClick: () => closeVoiceCall(),
-                  icon: Icon(
-                    Icons.call_end_rounded,
-                    color: Colors.white,
-                    size: 14,
+                    text: "Stop voice call",
+                    textColor: Colors.white,
                   ),
-                  text: "Stop voice call",
-                  textColor: Colors.white,
-                ),
-              )
-            ],
+                )
+              ],
+            ),
           ),
         ),
         Offstage(
           offstage: !client.incomingVoiceCall,
-          child: Row(
-            children: [
-              Expanded(
-                child: buildButton(context,
-                    color: MyTheme.accent,
-                    onClick: () => handleVoiceCall(true),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: buildButton(context,
+                      color: MyTheme.accent,
+                      onClick: () => handleVoiceCall(true),
+                      icon: Icon(
+                        Icons.call_rounded,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                      text: "Accept",
+                      textColor: Colors.white),
+                ),
+                const SizedBox(width: 6.0),
+                Expanded(
+                  child: buildButton(
+                    context,
+                    color: Colors.red,
+                    onClick: () => handleVoiceCall(false),
                     icon: Icon(
-                      Icons.call_rounded,
+                      Icons.phone_disabled_rounded,
                       color: Colors.white,
                       size: 14,
                     ),
-                    text: "Accept",
-                    textColor: Colors.white),
-              ),
-              Expanded(
-                child: buildButton(
-                  context,
-                  color: Colors.red,
-                  onClick: () => handleVoiceCall(false),
-                  icon: Icon(
-                    Icons.phone_disabled_rounded,
-                    color: Colors.white,
-                    size: 14,
+                    text: "Dismiss",
+                    textColor: Colors.white,
                   ),
-                  text: "Dismiss",
-                  textColor: Colors.white,
-                ),
-              )
-            ],
+                )
+              ],
+            ),
           ),
         ),
         Offstage(
@@ -1034,21 +1051,24 @@ class _CmControlPanel extends StatelessWidget {
             textColor: Colors.white,
           ),
         ),
-        Row(
-          children: [
-            Expanded(
-              child: buildButton(context,
-                  color: Colors.redAccent,
-                  onClick: handleDisconnect,
-                  text: 'Disconnect',
-                  icon: Icon(
-                    Icons.link_off_rounded,
-                    color: Colors.white,
-                    size: 14,
-                  ),
-                  textColor: Colors.white),
-            ),
-          ],
+        Container(
+          margin: const EdgeInsets.only(top: 4.0),
+          child: Row(
+            children: [
+              Expanded(
+                child: buildButton(context,
+                    color: Colors.redAccent,
+                    onClick: handleDisconnect,
+                    text: 'Disconnect',
+                    icon: Icon(
+                      Icons.link_off_rounded,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                    textColor: Colors.white),
+              ),
+            ],
+          ),
         )
       ],
     ).marginOnly(bottom: buttonBottomMargin);

@@ -804,20 +804,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       BuildContext context, _ToolbarEdge edge, bool isHorizontal) {
     final List<Widget> toolbarItems = [];
     toolbarItems.add(_PinMenu(state: widget.state));
-    toolbarItems.add(Obx(() {
-      final privacyModeState = PrivacyModeState.find(widget.id);
-      if ((privacyModeState.isEmpty ||
-              allowDisplaySwitchInPrivacyMode(pi, privacyModeState.value)) &&
-          pi.displaysCount.value > 1 &&
-          mainGetLocalBoolOptionSync(kOptionAllowMonitorSwitchMainToolbar)) {
-        return _MainMonitorSwitchButton(id: widget.id, ffi: widget.ffi);
-      } else {
-        return const Offstage();
-      }
-    }));
-    if (!isWebDesktop) {
-      toolbarItems.add(_MobileActionMenu(ffi: widget.ffi));
-    }
+    toolbarItems.add(_FileTransferMenu(id: widget.id, ffi: widget.ffi));
 
     toolbarItems.add(Obx(() {
       final privacyModeState = PrivacyModeState.find(widget.id);
@@ -834,23 +821,29 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       }
     }));
 
-    toolbarItems
-        .add(_ControlMenu(id: widget.id, ffi: widget.ffi, state: widget.state));
     toolbarItems.add(_DisplayMenu(
       id: widget.id,
       ffi: widget.ffi,
       state: widget.state,
       setFullscreen: _setFullscreen,
     ));
+    toolbarItems
+        .add(_ControlMenu(id: widget.id, ffi: widget.ffi, state: widget.state));
+    toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
     // Do not show keyboard for camera connection type.
     if (widget.ffi.connType == ConnType.defaultConn) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
     }
-    toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
+    if (!isWebDesktop && ffiModel.isPeerAndroid) {
+      toolbarItems.add(_MobileActionMenu(ffi: widget.ffi));
+    }
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
+      toolbarItems.add(Builder(builder: (context) {
+        final recordingModel = Provider.of<RecordingModel>(context);
+        return recordingModel.start ? const _RecordMenu() : const Offstage();
+      }));
     }
-    if (!isWeb) toolbarItems.add(_RecordMenu());
     toolbarItems.add(_CloseMenu(id: widget.id, ffi: widget.ffi));
     final toolbarBorderRadius = BorderRadius.all(Radius.circular(4.0));
     // innerAxis: how the toolbar icons themselves flow.
@@ -1057,6 +1050,41 @@ class _MainMonitorSwitchButton extends StatelessWidget {
   }
 }
 
+class _FileTransferMenu extends StatelessWidget {
+  final String id;
+  final FFI ffi;
+
+  const _FileTransferMenu({
+    Key? key,
+    required this.id,
+    required this.ffi,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    if (ffi.connType != ConnType.defaultConn || ffi.ffiModel.isPeerAndroid) {
+      return const Offstage();
+    }
+    return _IconMenuButton(
+      tooltip: 'Transfer file',
+      assetName: 'assets/file_transfer.svg',
+      color: _ToolbarTheme.blueColor,
+      hoverColor: _ToolbarTheme.hoverBlueColor,
+      onPressed: () {
+        connect(
+          context,
+          id,
+          loginMethod: bind.sessionGetCommonSync(
+                  sessionId: ffi.sessionId, key: 'login_method', param: '') ??
+              '',
+          isFileTransfer: true,
+          connToken: bind.sessionGetConnToken(sessionId: ffi.sessionId),
+        );
+      },
+    );
+  }
+}
+
 class _MonitorMenu extends StatelessWidget {
   final String id;
   final FFI ffi;
@@ -1070,8 +1098,11 @@ class _MonitorMenu extends StatelessWidget {
     required this.setRemoteState,
   }) : super(key: key);
 
-  bool get showMonitorsToolbar =>
-      bind.mainGetUserDefaultOption(key: kKeyShowMonitorsToolbar) == 'Y';
+  bool get showMonitorsToolbar {
+    final opt = bind.mainGetUserDefaultOption(key: kKeyShowMonitorsToolbar);
+    if (opt.isEmpty) return true;
+    return opt == 'Y';
+  }
 
   bool get supportIndividualWindows =>
       !isWeb && ffi.ffiModel.pi.isSupportMultiDisplay;
