@@ -104,6 +104,8 @@ pub fn core_main() -> Option<CoreMainAction> {
         #[cfg(target_os = "windows")]
         let should_check_start_tray = crate::platform::is_self_service_running()
             && crate::platform::is_cur_exe_the_installed();
+        #[cfg(target_os = "windows")]
+        hbb_common::allow_err!(crate::platform::check_autostart_config());
         if should_check_start_tray && !crate::check_process("--tray", true) {
             #[cfg(target_os = "linux")]
             hbb_common::allow_err!(crate::platform::check_autostart_config());

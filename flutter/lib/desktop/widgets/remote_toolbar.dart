@@ -2697,6 +2697,7 @@ class _KeyboardMenu extends StatelessWidget {
   }
 
   inputSource() {
+    return Offstage();
     final supportedInputSource = bind.mainSupportedInputSource();
     if (supportedInputSource.isEmpty) return Offstage();
     late final List<dynamic> supportedInputSourceList;

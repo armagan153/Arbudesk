@@ -3192,6 +3192,9 @@ Future<bool> canBeBlocked() async {
 
   // Check local settings
   var accessMode = await bind.mainGetOption(key: kOptionAccessMode);
+  if (accessMode.isEmpty) {
+    accessMode = 'full';
+  }
   var isCustomAccessMode = accessMode != 'full' && accessMode != 'view';
   var option = option2bool(kOptionAllowRemoteConfigModification,
       await bind.mainGetOption(key: kOptionAllowRemoteConfigModification));

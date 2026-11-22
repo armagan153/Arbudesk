@@ -431,7 +431,12 @@ pub fn set_local_kb_layout_type(kb_layout_type: String) {
 
 pub fn session_get_view_style(session_id: SessionID) -> Option<String> {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
-        Some(session.get_view_style())
+        let style = session.get_view_style();
+        if style.is_empty() {
+            Some("adaptive".to_string())
+        } else {
+            Some(style)
+        }
     } else {
         None
     }

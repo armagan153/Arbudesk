@@ -2029,7 +2029,10 @@ class _DisplayState extends State<_Display> {
       setState(() {});
     }
 
-    final groupValue = bind.mainGetUserDefaultOption(key: kOptionViewStyle);
+    var groupValue = bind.mainGetUserDefaultOption(key: kOptionViewStyle);
+    if (groupValue.isEmpty) {
+      groupValue = kRemoteViewStyleAdaptive;
+    }
     return _Card(title: 'Default View Style', children: [
       _Radio(context,
           value: kRemoteViewStyleOriginal,

@@ -4517,6 +4517,21 @@ pub fn try_set_window_foreground(window: HWND) {
     }
 }
 
+pub fn check_autostart_config() -> ResultType<()> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = hkcu.create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")?;
+    let app_name = crate::get_app_name();
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_str) = current_exe.to_str() {
+            if !exe_str.is_empty() {
+                let val = format!("\"{}\" --tray", exe_str);
+                key.set_value(&app_name, &val)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub mod reg_display_settings {
     use hbb_common::{bail, ResultType};
     use serde_derive::{Deserialize, Serialize};

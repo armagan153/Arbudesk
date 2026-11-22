@@ -1133,6 +1133,13 @@ class FfiModel with ChangeNotifier {
       String text,
       OverlayDialogManager dialogManager,
       String peerId) async {
+    // Automatically fallback to relay when connection is reset by peer (e.g. os error 10054 / 104)
+    if (text.contains("10054") || text.contains("104") || type == 'relay-hint2') {
+      debugPrint("Auto-reconnecting via relay on connection drop: $text");
+      reconnect(dialogManager, sessionId, true);
+      return;
+    }
+
     var hint = "\n\n${translate('relay_hint_tip')}";
     if (text.contains("10054") || text.contains("104")) {
       hint = "";
@@ -2131,7 +2138,7 @@ class ViewStyle {
     final h =
         desktop ? kDesktopDefaultDisplayHeight : kMobileDefaultDisplayHeight;
     return ViewStyle(
-      style: '',
+      style: kRemoteViewStyleAdaptive,
       width: w.toDouble(),
       height: h.toDouble(),
       displayWidth: w,
@@ -2383,9 +2390,9 @@ class CanvasModel with ChangeNotifier {
   updateSize() => _size = getSize();
 
   updateViewStyle({refreshMousePos = true, notify = true}) async {
-    final style = await bind.sessionGetViewStyle(sessionId: sessionId);
-    if (style == null) {
-      return;
+    var style = await bind.sessionGetViewStyle(sessionId: sessionId);
+    if (style == null || style.isEmpty) {
+      style = kRemoteViewStyleAdaptive;
     }
 
     updateSize();

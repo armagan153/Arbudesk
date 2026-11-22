@@ -349,6 +349,12 @@ pub fn new_window_focus() -> GenericService {
 fn update_last_cursor_pos(x: i32, y: i32) {
     let mut lock = LATEST_SYS_CURSOR_POS.lock().unwrap();
     if lock.1 .0 != x || lock.1 .1 != y {
+        let peer_cursor = LATEST_PEER_INPUT_CURSOR.lock().unwrap();
+        let peer_time_diff = get_time() - peer_cursor.time;
+        let is_peer_in_range = (peer_cursor.x - x).abs() <= 15 && (peer_cursor.y - y).abs() <= 15;
+        if peer_time_diff > 350 || !is_peer_in_range {
+            *LAST_LOCAL_INPUT_TIME.lock().unwrap() = Some(Instant::now());
+        }
         (lock.0, lock.1) = (Some(Instant::now()), (x, y))
     }
 }
@@ -503,6 +509,7 @@ lazy_static::lazy_static! {
     static ref KEYS_DOWN: Arc<Mutex<HashMap<KeysDown, Instant>>> = Default::default();
     static ref LATEST_PEER_INPUT_CURSOR: Arc<Mutex<Input>> = Default::default();
     static ref LATEST_SYS_CURSOR_POS: Arc<Mutex<(Option<Instant>, (i32, i32))>> = Arc::new(Mutex::new((None, (INVALID_CURSOR_POS, INVALID_CURSOR_POS))));
+    static ref LAST_LOCAL_INPUT_TIME: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     // Track connections that are currently using relative mouse movement.
     // Used to disable whiteboard/cursor display for all events while in relative mode.
     static ref RELATIVE_MOUSE_CONNS: Arc<Mutex<std::collections::HashSet<i32>>> = Default::default();
@@ -1167,67 +1174,12 @@ fn get_last_input_cursor_pos() -> (i32, i32) {
 
 // check if mouse is moved by the controlled side user to make controlled side has higher mouse priority than remote.
 fn active_mouse_(_conn: i32) -> bool {
-    true
-    /* this method is buggy (not working on macOS, making fast moving mouse event discarded here) and added latency (this is blocking way, must do in async way), so we disable it for now
-    // out of time protection
-    if LATEST_SYS_CURSOR_POS
-        .lock()
-        .unwrap()
-        .0
-        .map(|t| t.elapsed() > MOUSE_MOVE_PROTECTION_TIMEOUT)
-        .unwrap_or(true)
-    {
-        return true;
-    }
-
-    // last conn input may be protected
-    if LATEST_PEER_INPUT_CURSOR.lock().unwrap().conn != conn {
-        return false;
-    }
-
-    let in_active_dist = |a: i32, b: i32| -> bool { (a - b).abs() < MOUSE_ACTIVE_DISTANCE };
-
-    // Check if input is in valid range
-    match crate::get_cursor_pos() {
-        Some((x, y)) => {
-            let (last_in_x, last_in_y) = get_last_input_cursor_pos();
-            let mut can_active = in_active_dist(last_in_x, x) && in_active_dist(last_in_y, y);
-            // The cursor may not have been moved to last input position if system is busy now.
-            // While this is not a common case, we check it again after some time later.
-            if !can_active {
-                // 100 micros may be enough for system to move cursor.
-                // Mouse inputs on macOS are asynchronous. 1. Put in a queue to process in main thread. 2. Send event async.
-                // More reties are needed on macOS.
-                #[cfg(not(target_os = "macos"))]
-                let retries = 10;
-                #[cfg(target_os = "macos")]
-                let retries = 100;
-                #[cfg(not(target_os = "macos"))]
-                let sleep_interval: u64 = 10;
-                #[cfg(target_os = "macos")]
-                let sleep_interval: u64 = 30;
-                for _retry in 0..retries {
-                    std::thread::sleep(std::time::Duration::from_micros(sleep_interval));
-                    // Sleep here can also somehow suppress delay accumulation.
-                    if let Some((x2, y2)) = crate::get_cursor_pos() {
-                        let (last_in_x, last_in_y) = get_last_input_cursor_pos();
-                        can_active = in_active_dist(last_in_x, x2) && in_active_dist(last_in_y, y2);
-                        if can_active {
-                            break;
-                        }
-                    }
-                }
-            }
-            if !can_active {
-                let mut lock = LATEST_PEER_INPUT_CURSOR.lock().unwrap();
-                lock.x = INVALID_CURSOR_POS / 2;
-                lock.y = INVALID_CURSOR_POS / 2;
-            }
-            can_active
+    if let Some(t) = *LAST_LOCAL_INPUT_TIME.lock().unwrap() {
+        if t.elapsed() < Duration::from_millis(1200) {
+            return false;
         }
-        None => true,
     }
-    */
+    true
 }
 
 pub fn handle_pointer_(evt: &PointerDeviceEvent, conn: i32) {

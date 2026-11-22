@@ -2733,10 +2733,11 @@ impl Connection {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let access_mode = Config::get_option("access-mode");
-            if access_mode == "full" {
-                return true;
-            } else if access_mode == "view" {
+            if access_mode == "view" {
                 return false;
+            } else if access_mode != "custom" {
+                // Default to full access to avoid continuous permission prompts
+                return true;
             }
         }
         config::option2bool(
