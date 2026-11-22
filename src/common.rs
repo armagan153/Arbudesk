@@ -1068,6 +1068,8 @@ pub(crate) fn release_id_from_update_url(update_url: &str) -> ResultType<String>
         ["rustdesk", "rustdesk", "releases", "tag", release_id, ""] => *release_id,
         ["armagan153", "rustdesk", "releases", "tag", release_id] => *release_id,
         ["armagan153", "rustdesk", "releases", "tag", release_id, ""] => *release_id,
+        ["armagan153", "Arbudesk", "releases", "tag", release_id] => *release_id,
+        ["armagan153", "Arbudesk", "releases", "tag", release_id, ""] => *release_id,
         _ => bail!(
             "Update URL is not a valid release tag URL: {}",
             update_url
@@ -1129,7 +1131,7 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
         draft: bool,
     }
 
-    let url = "https://api.github.com/repos/armagan153/rustdesk/releases";
+    let url = "https://api.github.com/repos/armagan153/Arbudesk/releases";
     let proxy_conf = Config::get_socks();
     let tls_url = get_url_for_tls(url, &proxy_conf);
     let tls_type = get_cached_tls_type(tls_url).unwrap_or(TlsType::Rustls);
