@@ -121,7 +121,7 @@ jobs:
 
       - name: Publish Release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
-        if: env.UPLOAD_ARTIFACT == 'true'
+        if: false
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
@@ -585,8 +585,6 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            ./SignOutput/rustdesk-*.msi
-            ./SignOutput/rustdesk-*.exe
             ./SignOutput/ArBuDesk-*.exe
 
   # The fallback for the flutter version, we use Sciter for 32bit Windows.
@@ -927,6 +925,7 @@ jobs:
 
 
   build-for-macOS:
+    if: false
     name: ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
     needs: [generate-bridge]
