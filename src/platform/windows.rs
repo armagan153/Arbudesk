@@ -71,7 +71,9 @@ use winapi::{
     },
 };
 use windows::Win32::{
-    Foundation::{CloseHandle as WinCloseHandle, HANDLE as WinHANDLE},
+    Foundation::{
+        CloseHandle as WinCloseHandle, ERROR_SERVICE_DOES_NOT_EXIST, HANDLE as WinHANDLE,
+    },
     Security::{
         GetTokenInformation as WinGetTokenInformation, IsWellKnownSid, TokenUser,
         WinLocalSystemSid, TOKEN_QUERY as WIN_TOKEN_QUERY, TOKEN_USER,
@@ -89,14 +91,16 @@ use windows::Win32::{
 use windows_service::{
     define_windows_service,
     service::{
-        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
-        ServiceType,
+        ServiceAccess, ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState,
+        ServiceStatus, ServiceType,
     },
     service_control_handler::{self, ServiceControlHandlerResult},
+    service_manager::{ServiceManager, ServiceManagerAccess},
 };
 use winreg::{enums::*, RegKey};
 
 mod acl;
+pub(crate) mod installer_files;
 mod installer_handoff;
 mod installer_shell;
 mod verified_update;
@@ -107,10 +111,10 @@ pub use acl::{
     set_path_permission_for_portable_service_shmem_file,
     validate_path_for_portable_service_shmem_dir,
 };
-use installer_handoff::run_cmds;
+use installer_handoff::{run_cmds, InstallCommands};
 use installer_shell::{
-    embedded_shortcut_commands, embedded_tray_shortcut_commands, escape_nested_cmd_ampersands,
-    shortcut_bytes, validate_install_value,
+    escape_nested_cmd_ampersands, shortcut_bytes, staged_shortcut_commands,
+    staged_tray_shortcut_commands, validate_install_value,
 };
 pub use verified_update::{
     copy_and_verify_update_file_sha256, schedule_current_verified_update_file_cleanup,
@@ -1565,6 +1569,31 @@ pub fn remove_meta_toml_cmd(is_msi: bool, path: &str) -> String {
     }
 }
 
+fn resolve_firewall_rules(
+    args: impl Iterator<Item = OsString>,
+    read_saved: impl FnOnce() -> io::Result<String>,
+) -> &'static str {
+    let value = args
+        .filter_map(|arg| {
+            let arg = arg.to_string_lossy();
+            let (key, value) = arg.split_once('=')?;
+            key.eq_ignore_ascii_case("FIREWALLRULES")
+                .then(|| value.to_owned())
+        })
+        .last()
+        .map(Ok)
+        .unwrap_or_else(read_saved);
+    let error = match value.as_deref() {
+        Ok("0" | "N" | "n") => return "0",
+        Ok("1" | "Y" | "y") => return "1",
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return "1",
+        Err(error) => error.to_string(),
+        _ => "FIREWALLRULES must be 0, 1, Y, or N".to_owned(),
+    };
+    log::warn!("Failed to resolve FIREWALLRULES: {error}; using the default value 1 and continuing installation");
+    "1"
+}
+
 fn get_after_install(
     exe: &str,
     reg_value_start_menu_shortcuts: Option<String>,
@@ -1573,6 +1602,12 @@ fn get_after_install(
 ) -> String {
     let app_name = crate::get_app_name();
     let ext = app_name.to_lowercase();
+    // Resolve the saved choice before the reinstall script deletes its registry key.
+    let firewall_rules = resolve_firewall_rules(std::env::args_os().skip(1), || {
+        RegKey::predef(HKEY_CLASSES_ROOT)
+            .open_subkey(format!(".{ext}"))?
+            .get_value("FIREWALLRULES")
+    });
     let nested_exe = escape_nested_cmd_ampersands(exe);
 
     // reg delete HKEY_CURRENT_USER\Software\Classes for
@@ -1620,8 +1655,12 @@ fn get_after_install(
     reg add HKEY_CLASSES_ROOT\\{ext}\\shell\\open /f
     reg add HKEY_CLASSES_ROOT\\{ext}\\shell\\open\\command /f
     reg add HKEY_CLASSES_ROOT\\{ext}\\shell\\open\\command /f /ve /t REG_SZ /d \"\\\"{nested_exe}\\\" \\\"%%1\\\"\"
+    reg add HKEY_CLASSES_ROOT\\.{ext} /f /v FIREWALLRULES /t REG_SZ /d \"{firewall_rules}\"
+    if not \"%errorlevel%\"==\"0\" echo WARNING: Failed to save FIREWALLRULES. Continuing installation; future upgrades may use the default. 1>&2
+    if \"{firewall_rules}\"==\"1\" (
     netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=out action=allow program=\"{exe}\" enable=yes
     netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=in action=allow program=\"{exe}\" enable=yes
+    )
     {create_service}
     reg add HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /f /v SoftwareSASGeneration /t REG_DWORD /d 1
     ", create_service=get_create_service(&exe))
@@ -1678,18 +1717,16 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     // The elevated runner expands this to `%~f0.dir`, beside its protected copy.
     // Do not stage privileged shortcut artifacts in the user-writable `%TEMP%`.
     let tmp_path = "%RUSTDESK_OUTPUT_DIR%".to_owned();
-    let mk_shortcut_commands = embedded_shortcut_commands(
+    let (mk_shortcut_commands, mk_shortcut_file) = staged_shortcut_commands(
         shortcut_bytes(&exe, None, shortcut_icon_location.as_deref())?,
         &format!("{app_name}.lnk"),
-        "mk_shortcut",
-    );
-    let uninstall_shortcut_commands = embedded_shortcut_commands(
+    )?;
+    let (uninstall_shortcut_commands, uninstall_shortcut_file) = staged_shortcut_commands(
         shortcut_bytes(&exe, Some("--uninstall"), Some("msiexec.exe"))?,
         &format!("Uninstall {app_name}.lnk"),
-        "uninstall_shortcut",
-    );
-    let tray_shortcut_commands =
-        embedded_tray_shortcut_commands(&app_name, &exe, shortcut_icon_location.as_deref())?;
+    )?;
+    let (tray_shortcut_commands, tray_shortcut_file) =
+        staged_tray_shortcut_commands(&app_name, &exe, shortcut_icon_location.as_deref())?;
     let mut reg_value_desktop_shortcuts = "0".to_owned();
     let mut reg_value_start_menu_shortcuts = "0".to_owned();
     let mut reg_value_printer = "0".to_owned();
@@ -1763,6 +1800,17 @@ copy /Y \"{tmp_path}\\{app_name} Tray.lnk\" \"%PROGRAMDATA%\\Microsoft\\Windows\
         "".to_owned()
     };
 
+    let after_install = get_after_install(
+        &exe,
+        Some(reg_value_start_menu_shortcuts),
+        Some(reg_value_desktop_shortcuts),
+        Some(reg_value_printer),
+    );
+    let after_install = native_after_install_commands(
+        format!("{after_install}\r\n{install_remote_printer}"),
+        &exe,
+        true,
+    )?;
     // Remember to check if `update_me` need to be changed if changing the `cmds`.
     // No need to merge the existing dup code, because the code in these two functions are too critical.
     // New code should be written in a common function.
@@ -1795,26 +1843,26 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
 {dels}
 {import_config}
 {after_install}
-{install_remote_printer}
 {sleep}
     ",
         display_icon = shortcut_icon_location.as_deref().unwrap_or(exe.as_str()),
         nested_exe = escape_nested_cmd_ampersands(&exe),
         version = crate::VERSION.replace("-", "."),
         build_date = crate::BUILD_DATE,
-        after_install = get_after_install(
-            &exe,
-            Some(reg_value_start_menu_shortcuts),
-            Some(reg_value_desktop_shortcuts),
-            Some(reg_value_printer)
-        ),
         sleep = if debug { "timeout 300" } else { "" },
         dels = if debug { "" } else { &dels },
         copy_exe = copy_exe_cmd(&src_exe, &exe, &path)?,
         rename_exe = rename_exe_cmd(&src_exe, &path)?,
         import_config = get_import_config(&exe),
     );
-    run_cmds(cmds, debug, "install")?;
+    run_cmds(
+        InstallCommands {
+            script: cmds,
+            files: vec![mk_shortcut_file, uninstall_shortcut_file, tray_shortcut_file],
+        },
+        debug,
+        "install",
+    )?;
     run_after_run_cmds(silent);
     Ok(())
 }
@@ -1822,29 +1870,30 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
 pub fn run_after_install() -> ResultType<()> {
     let (_, _, _, exe) = get_install_info();
     run_cmds(
-        get_after_install(&exe, None, None, None),
+        native_after_install_commands(get_after_install(&exe, None, None, None), &exe, false)?,
         true,
         "after_install",
     )
 }
 
 pub fn run_before_uninstall() -> ResultType<()> {
-    run_cmds(get_before_uninstall(true), true, "before_install")
+    run_cmds(get_before_uninstall(true)?, true, "before_install")
 }
 
-fn get_before_uninstall(kill_self: bool) -> String {
+fn get_before_uninstall(kill_self: bool) -> ResultType<String> {
     let app_name = crate::get_app_name();
+    let (_, _, _, exe) = get_install_info();
+    let remove_service = service_control_command("remove", &exe, false)?;
     let ext = app_name.to_lowercase();
     let filter = if kill_self {
         "".to_string()
     } else {
         format!(" /FI \"PID ne {}\"", get_current_pid())
     };
-    format!(
+    Ok(format!(
         "
     chcp 65001
-    sc stop {app_name}
-    sc delete {app_name}
+    {remove_service}
     taskkill /F /IM {broker_exe}
     taskkill /F /IM {app_name}.exe{filter}
     taskkill /F /IM rustdesk.exe{filter}
@@ -1853,7 +1902,7 @@ fn get_before_uninstall(kill_self: bool) -> String {
     netsh advfirewall firewall delete rule name=\"{app_name} Service\"
     ",
         broker_exe = WIN_TOPMOST_INJECTED_PROCESS_EXE,
-    )
+    ))
 }
 
 /// Constructs the uninstall command string for the application.
@@ -1902,13 +1951,31 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String>
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\RustDesk Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\RustDesk Tray.lnk\"
     ",
-        before_uninstall=get_before_uninstall(kill_self),
+        before_uninstall=get_before_uninstall(kill_self)?,
         uninstall_amyuni_idd=get_uninstall_amyuni_idd(),
         app_name = crate::get_app_name(),
     ))
 }
 
 pub fn uninstall_me(kill_self: bool) -> ResultType<()> {
+    if is_self_service_running() {
+        // This CLI entry is synchronous. Portable builds reuse the retained user configuration.
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(hbb_common::anyhow::Error::from)
+            .and_then(|runtime| {
+                runtime.block_on(crate::trusted_devices::config::refresh_from_server())
+            });
+        if let Err(error) = result {
+            log::warn!(
+                "Failed to synchronize configuration before uninstall; revoking local trusted devices before continuing: {error:#}"
+            );
+            if let Err(error) = crate::trusted_devices::clear() {
+                log::warn!("Failed to revoke local trust; continuing removal: {error:#}");
+            }
+        }
+    }
     run_cmds(get_uninstall(kill_self, true)?, true, "uninstall")
 }
 
@@ -3342,15 +3409,42 @@ pub fn try_lock_tray_single_instance() -> bool {
     }
 }
 
+/// Returns `true` on failure or cancellation so the caller keeps running.
+/// Successful removal exits this process instead of returning.
 pub fn uninstall_service(show_new_window: bool, _: bool) -> bool {
     log::info!("Uninstalling service...");
+    if is_self_service_running() {
+        // UI/tray/CLI callers are synchronous. Refresh the file before killing its source.
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(hbb_common::anyhow::Error::from)
+            .and_then(|runtime| {
+                runtime.block_on(crate::trusted_devices::config::refresh_from_server())
+            });
+        if let Err(error) = result {
+            log::warn!(
+                "Failed to synchronize configuration before service removal; revoking local trusted devices before continuing: {error:#}"
+            );
+            if let Err(error) = crate::trusted_devices::clear() {
+                log::warn!("Failed to revoke local trust; continuing removal: {error:#}");
+            }
+        }
+    }
     let filter = format!(" /FI \"PID ne {}\"", get_current_pid());
+    let (_, _, _, exe) = get_install_info();
+    let remove_service = match service_control_command("remove", &exe, false) {
+        Ok(commands) => commands,
+        Err(err) => {
+            log::error!("Failed to prepare service removal: {err}");
+            return true;
+        }
+    };
     Config::set_option("stop-service".into(), "Y".into());
     let cmds = format!(
         "
     chcp 65001
-    sc stop {app_name}
-    sc delete {app_name}
+    {remove_service}
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
     taskkill /F /IM {broker_exe}
     taskkill /F /IM {app_name}.exe{filter}
@@ -3368,7 +3462,7 @@ pub fn uninstall_service(show_new_window: bool, _: bool) -> bool {
     std::process::exit(0);
 }
 
-fn get_install_service_commands(path: &str, exe: &str) -> ResultType<String> {
+fn get_install_service_commands(path: &str, exe: &str) -> ResultType<InstallCommands> {
     let app_name = crate::get_app_name();
     for value in [path, exe] {
         validate_install_value(value)?;
@@ -3383,10 +3477,10 @@ fn get_install_service_commands(path: &str, exe: &str) -> ResultType<String> {
     if let Some(icon) = shortcut_icon_location.as_deref() {
         validate_install_value(icon)?;
     }
-    let tray_shortcut_commands =
-        embedded_tray_shortcut_commands(&app_name, exe, shortcut_icon_location.as_deref())?;
+    let (tray_shortcut_commands, tray_shortcut_file) =
+        staged_tray_shortcut_commands(&app_name, exe, shortcut_icon_location.as_deref())?;
     let filter = format!(" /FI \"PID ne {}\"", get_current_pid());
-    Ok(format!(
+    let script = format!(
         "
 chcp 65001
 taskkill /F /IM {app_name}.exe{filter}
@@ -3396,26 +3490,34 @@ copy /Y \"%RUSTDESK_OUTPUT_DIR%\\{app_name} Tray.lnk\" \"%PROGRAMDATA%\\Microsof
 {create_service}
     ",
         import_config = get_import_config(exe),
-        create_service = get_create_service(exe),
-    ))
+        create_service = service_control_command("create-service-with-rollback", exe, false)?,
+    );
+    Ok(InstallCommands {
+        script,
+        files: vec![tray_shortcut_file],
+    })
 }
 
 pub fn install_service() -> bool {
+    let Some(_installing) = crate::platform::InstallingService::try_new() else {
+        log::trace!("Service installation is already in progress");
+        return true;
+    };
     log::info!("Installing service...");
-    let _installing = crate::platform::InstallingService::new();
     let (_, path, _, exe) = get_install_info();
+    let previous_stop_service = Config::get_option("stop-service");
     Config::set_option("stop-service".into(), "".into());
     let cmds = match get_install_service_commands(&path, &exe) {
         Ok(cmds) => cmds,
         Err(err) => {
-            Config::set_option("stop-service".into(), "Y".into());
+            Config::set_option("stop-service".into(), previous_stop_service);
             log::error!("Failed to prepare service installation: {err}");
             return true;
         }
     };
     crate::ipc::EXIT_RECV_CLOSE.store(false, Ordering::Relaxed);
     if let Err(err) = run_cmds(cmds, false, "install") {
-        Config::set_option("stop-service".into(), "Y".into());
+        Config::set_option("stop-service".into(), previous_stop_service);
         crate::ipc::EXIT_RECV_CLOSE.store(true, Ordering::Relaxed);
         log::debug!("{err}");
         return true;
@@ -3948,7 +4050,86 @@ pub fn update_me_msi(msi: &str, expected_sha256: &str, quiet: bool) -> ResultTyp
     verified_update::install_verified_msi(msi, expected_sha256, quiet)
 }
 
+fn native_after_install_commands(
+    commands: String,
+    exe: &str,
+    installed_now: bool,
+) -> ResultType<String> {
+    let service = get_create_service(exe);
+    if service.is_empty() {
+        return Ok(commands);
+    }
+    let native_service = service_control_command("create-service", exe, installed_now)?;
+    if native_service == service {
+        return Ok(commands);
+    }
+    // Complete independent setup before service-start errors can exit the BAT.
+    Ok(format!(
+        "{}\r\n{native_service}",
+        commands.replacen(&service, "", 1)
+    ))
+}
+
+#[cfg(not(feature = "flutter"))]
+pub fn handle_service_control() -> Option<std::process::ExitCode> {
+    if std::env::args_os().nth(1).as_deref() != Some(std::ffi::OsStr::new("--service-control")) {
+        return None;
+    }
+    extern "C" {
+        fn run_service_control() -> u32;
+    }
+    let error = unsafe { run_service_control() };
+    Some(if error == ERROR_SUCCESS {
+        std::process::ExitCode::SUCCESS
+    } else {
+        eprintln!(
+            "RustDesk service control failed: {}",
+            std::io::Error::from_raw_os_error(error as i32)
+        );
+        std::process::ExitCode::FAILURE
+    })
+}
+
+fn service_control_command(operation: &str, exe: &str, installed_now: bool) -> ResultType<String> {
+    let app_name = crate::get_app_name();
+    let is_create = matches!(operation, "create-service" | "create-service-with-rollback");
+    let legacy = match operation {
+        "create-service" | "create-service-with-rollback" => get_create_service(exe),
+        "remove" => format!("sc stop {app_name}\r\nsc delete {app_name}"),
+        _ => bail!("Unsupported service operation: {operation}"),
+    };
+    if legacy.is_empty() || (is_create && Config::get_option("stop-service") == "Y") {
+        return Ok(legacy);
+    }
+    // A fresh installation has just copied this runner. Otherwise only use the
+    // new command when the caller is the installed executable; other versions
+    // may not recognize it.
+    if !installed_now {
+        let current = std::env::current_exe()?;
+        let current = current
+            .to_str()
+            .ok_or_else(|| anyhow!("Current executable path is not valid Unicode"))?;
+        if !current.eq_ignore_ascii_case(exe) {
+            log::debug!("Keeping legacy service commands for a different installed executable");
+            return Ok(legacy);
+        }
+    }
+    validate_install_value(exe)?;
+    let executable_argument = if is_create {
+        format!(" \"{exe}\"")
+    } else {
+        String::new()
+    };
+    Ok(format!(
+        "start \"\" /b /wait \"{exe}\" --service-control {operation} \"{app_name}\"{executable_argument}\r\n\
+         if not \"%errorlevel%\"==\"0\" exit /b %errorlevel%"
+    ))
+}
+
 fn get_import_config(exe: &str) -> String {
+    // --import-config does not register a service dispatcher, so SCM can report
+    // a start failure even when import runs. Preserve this legacy contract for
+    // older installed executables.
     if config::is_outgoing_only() {
         return "".to_string();
     }
@@ -4203,6 +4384,29 @@ pub fn is_service_running(service_name: &str) -> bool {
     }
 }
 
+pub fn is_installed_daemon() -> bool {
+    const SERVICE_QUERY_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+    let service_name = crate::get_app_name();
+    let service = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .and_then(|manager| manager.open_service(&service_name, ServiceAccess::QUERY_STATUS));
+    match service {
+        Ok(_) => true,
+        Err(windows_service::Error::Winapi(error))
+            if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST.0 as i32) =>
+        {
+            false
+        }
+        Err(error) => {
+            hbb_common::throttled_log!(
+                SERVICE_QUERY_LOG_INTERVAL,
+                error,
+                "Failed to query service registration for {service_name}; suppressing installation tip: {error:?}"
+            );
+            true
+        }
+    }
+}
+
 pub fn is_x64() -> bool {
     const PROCESSOR_ARCHITECTURE_AMD64: u16 = 9;
 
@@ -4314,7 +4518,7 @@ pub fn try_set_window_foreground(window: HWND) {
 }
 
 pub mod reg_display_settings {
-    use hbb_common::ResultType;
+    use hbb_common::{bail, ResultType};
     use serde_derive::{Deserialize, Serialize};
     use std::collections::HashMap;
     use winreg::{enums::*, RegValue};
@@ -4378,6 +4582,7 @@ pub mod reg_display_settings {
     }
 
     pub fn restore_reg_connectivity(reg_recovery: RegRecovery, force: bool) -> ResultType<()> {
+        connectivity_subkey(&reg_recovery)?;
         let hklm = winreg::RegKey::predef(HKEY_LOCAL_MACHINE);
         let reg_item = hklm.open_subkey_with_flags(&reg_recovery.path, KEY_READ | KEY_WRITE)?;
         if !force {
@@ -4417,6 +4622,60 @@ pub mod reg_display_settings {
             10 => RegType::REG_RESOURCE_REQUIREMENTS_LIST,
             11 => RegType::REG_QWORD,
             _ => RegType::REG_NONE,
+        }
+    }
+
+    fn connectivity_subkey(recovery: &RegRecovery) -> ResultType<&str> {
+        let prefix = format!("{}\\{}\\", REG_GRAPHICS_DRIVERS_PATH, REG_CONNECTIVITY_PATH);
+        let Some(subkey) = recovery.path.strip_prefix(&prefix) else {
+            bail!("Invalid display connectivity recovery target");
+        };
+        if recovery.key != "Recent"
+            || subkey.is_empty()
+            || matches!(subkey, "." | "..")
+            || subkey.chars().any(|c| matches!(c, '\\' | '/' | '\0'))
+        {
+            bail!("Invalid display connectivity recovery target");
+        }
+        Ok(subkey)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use winreg::types::ToRegValue;
+
+        #[test]
+        fn registry_recovery_rejects_external_targets_before_access() {
+            for force in [false, true] {
+                let recovery = RegRecovery {
+                    path: format!("SOFTWARE\\RustDesk\\{}", uuid::Uuid::new_v4()),
+                    key: "Recent".to_owned(),
+                    old: (vec![0x22; 4], RegType::REG_DWORD as isize),
+                    new: (vec![0x11; 4], RegType::REG_DWORD as isize),
+                };
+                let error = restore_reg_connectivity(recovery, force).unwrap_err();
+                assert_eq!(
+                    error.to_string(),
+                    "Invalid display connectivity recovery target"
+                );
+            }
+        }
+
+        #[test]
+        fn registry_recovery_accepts_display_changes() {
+            let connectivity = |value: &str| {
+                HashMap::from([(
+                    "monitor".to_owned(),
+                    HashMap::from([("Recent".to_owned(), value.to_reg_value())]),
+                )])
+            };
+            let recovery = diff_recent_connectivity(
+                connectivity("before"),
+                connectivity("after-layout-change"),
+            )
+            .unwrap();
+            assert_eq!(connectivity_subkey(&recovery).unwrap(), "monitor");
         }
     }
 }
